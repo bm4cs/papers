@@ -4,13 +4,13 @@ paper:
 	pandoc -s -F pandoc-crossref -F pandoc-citeproc --bibliography=paper.bib \
 	--variable papersize=a4paper \
 	-s paper.md -o paper.pdf
+#	--variable classoption=twocolumn \
 
-#TODO: --template option
-
-# How to make a scientific looking PDF from markdown (with bibliography)
-# https://gist.github.com/maxogden/97190db73ac19fc6c1d9beee1a6e4fc8
-
+latex:
+	pandoc -s -F pandoc-crossref -F pandoc-citeproc --bibliography=paper.bib \
+	--variable papersize=a4paper \
+	-s paper.md -t latex -o paper.tex
 
 clean:
-	rm -f *.pdf *.log
+	rm -f *.pdf *.log *.tex
 
