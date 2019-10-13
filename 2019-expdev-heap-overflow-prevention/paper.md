@@ -909,7 +909,13 @@ While the above @how2heap example does nothing harmful, it easy to imagine how a
 # Mitigation Controls
 
 
+## Free list pointer authentication
 
+One proposal is to authenticate the integrity of data pointers used to chain free chunks together in the various free list data structures (i.e. singly and doubly linked lists). "In our scheme, the dynamic memory manager encrypts a pointer linking free chunks immediately after it is defined, that is, assigned with an address, and decrypts the pointer only when its necessary to know the real addresses, before dereferencing." (@kim2012securing).
+
+    chunk->fd = e(k, next_chunk)
+
+The next free chunk `fd` pointer is encoded with encoding function `e` and key `k`. For encryption and decryption an exclusive-OR (XOR) operation is recommended, as XOR operations can be performed as a single ALU instruction in most microprocessors, striking a balance between performance of this low-level but frequent heap operation, and the security benefits it brings.
 
 
 
