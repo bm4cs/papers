@@ -1,3 +1,7 @@
+# Some other things
+*.tar.gz
+
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof

