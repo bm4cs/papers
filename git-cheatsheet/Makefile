@@ -2,7 +2,7 @@ all: clean paper
 
 paper:
 	pandoc -s \
-	-V papersize=a4paper -V geometry:margin=1.25in \
+	-V papersize=a4paper -V geometry:margin=0.5in \
 	-s paper.md -o paper.pdf \
 	--variable classoption=twocolumn \
 
