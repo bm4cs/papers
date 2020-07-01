@@ -36,7 +36,7 @@ description: "arf arf we gotcha"
 
 # log
 
-`show --pretty='' --name-status deadb33f` list files in commit
+`show --pretty='' --name-status deadb33f`
 
 `log --author=Benjamin`
 
@@ -52,9 +52,13 @@ description: "arf arf we gotcha"
 
 # diff
 
+Compare the contents of a file to an earlier revision.
+
 `diff HEAD^ HEAD Kerbal.java` to previous
 
-`diff 957... HEAD Kerbal.java` to specific commit
+`diff HEAD^^ HEAD Kerbal.java` to 2 commits back
+
+`diff deadb33f HEAD -- Kerbal.java` to specific commit
 
 `difftool HEAD~4 Kerbl.java` to 4 revs ago in GUI
 
@@ -68,17 +72,25 @@ description: "arf arf we gotcha"
 
 # commit
 
-`commit --amend --no-edit`
+`commit --amend --no-edit` ammends the last commit
 
 
 
-# reset
+# reset and clean
 
-`reset --hard deadb33f` resets everything (dirty, index) to commit or branch
+`reset --hard deadb33f` resets everything (untracker, index) to commit or branch
 
-`reset --soft deadb33f` preserve dirty, set HEAD to a commit, stage changes (squash)
+`reset --soft deadb33f` preserve untracked, set HEAD to a commit, stage changes (squash)
 
-`reset --mixed 1337123` like soft, without stage (unstage)
+`reset --mixed 1337123` like soft, without stage
+
+`clean -n` remove all untracked files recursively (dry run)
+
+`clean -f` actually do it
+
+`clean -f -d` for directories too
+
+`clean -f -X` remove ignored files (e.g. build outputs)
 
 
 # patches
