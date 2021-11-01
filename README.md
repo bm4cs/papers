@@ -4,7 +4,7 @@ A collection of my acaedmic papers and technical cheat sheets.
 
 Authored in crisp markdown transformed to downstream formats such as LaTeX and manpages using [pandoc](https://github.com/pandoc/dockerfiles)
 
-Individual papers are compiled using `Makefile`, which shell out to `pandoc` Docker container.
+Individual papers are compiled using `Makefile` which shells out to `pandoc` Docker container.
 
 # Papers
 
