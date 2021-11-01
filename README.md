@@ -2,17 +2,18 @@
 
 A collection of my acaedmic papers and technical cheat sheets.
 
-Mostly authored in clean markdown transformed to downstream formats such as LaTeX and manpages using [pandoc](https://github.com/pandoc/dockerfiles)
+Authored in crisp markdown transformed to downstream formats such as LaTeX and manpages using [pandoc](https://github.com/pandoc/dockerfiles)
 
-## Academic
+Individual papers are compiled using `Makefile`, which shell out to `pandoc` Docker container.
 
-### Cyber security
+# Papers
 
--   Critical analysis of Bluetooth Low Energy (radio) - 2021
--   Contempory heap allocator attacks (exploit development) - 2019
--   Technical analysis of ImageTragick CVE-2016-3714 (exploit development) - 2019
--   Binary similarity analysis and classification (reverse engineering) - 2019
+-   [Wireless: A critical analysis of Bluetooth Low Energy](/papers/2021-simmonds-radiosec-ble.pdf) (Sep 2021)
+-   [Wireless: Teardown of the TP-Link Kasa Smart Wi-Fi Plug KP115](/papers/2021-simmonds-radiosec-tplink-kp115-teardown.pdf) (Jul 2021)
+-   [Exploit Development: Contemporary Heap Allocator Attacks](/papers/2019-simmonds-exploitdev-heap-allocators.pdf) (Oct 2019)
+-   [Exploit Development: Technical Analysis of CVE-2016- ImageTragick](/papers/2019-simmonds-exploitdev-imagetragick.pdf) (Sep 2019)
+-   [Reverse Engineering: Feasibility of Binary Similarity Analysis](/papers/2019-simmonds-reveng-binary-similarity.pdf) (May 2019)
 
-## Cheatsheet
+# Cheat sheets
 
--   `git` for experienced users
+-   [Git](/papers/git-cheatsheet.pdf)
