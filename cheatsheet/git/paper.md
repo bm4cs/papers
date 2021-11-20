@@ -5,21 +5,20 @@ description: "arf arf we gotcha"
 
 # .gitconfig
 
-	[user]
-	  name = Ben Simmonds
-	  email = ben@bencode.net
-	  autocrlf = true
+    [user]
+      name = Ben Simmonds
+      email = ben@bencode.net
+      autocrlf = true
     [pull]
-	  rebase = true
-	[diff]
-	  tool = bc4
-	[difftool bc4]
-	  path=~/opt/bc4/bcomp
-	[merge]
-	  tool = bc4
-	[mergetool bc4]
-	  path=~/opt/bc4/bcomp
-
+      rebase = true
+    [diff]
+      tool = bc4
+    [difftool bc4]
+      path=~/opt/bc4/bcomp
+    [merge]
+      tool = bc4
+    [mergetool bc4]
+      path=~/opt/bc4/bcomp
 
 # checkout
 
@@ -27,12 +26,9 @@ description: "arf arf we gotcha"
 
 `checkout -- <pathspec>` checkout a file from branch
 
-
-
 # rebase or merge
 
 `pull --rebase` rebase any new commits from upstream
-
 
 # log
 
@@ -47,8 +43,6 @@ description: "arf arf we gotcha"
 `log --after=01/10/2018`
 
 `log --before="1 week ago"`
-
-
 
 # diff
 
@@ -68,17 +62,13 @@ Compare the contents of a file to an earlier revision.
 
 `diff master...develop` branches
 
-
-
 # commit
 
 `commit --amend --no-edit` ammends the last commit
 
-
-
 # reset and clean
 
-`reset --hard deadb33f` resets everything (untracker, index) to commit or branch
+`reset --hard deadb33f` resets everything (untracked, index) to commit or branch
 
 `reset --soft deadb33f` preserve untracked, set HEAD to a commit, stage changes (squash)
 
@@ -92,33 +82,30 @@ Compare the contents of a file to an earlier revision.
 
 `clean -f -X` remove ignored files (e.g. build outputs)
 
-
 # patches
 
 `diff > b.patch` make a patch file
 
-`add . && diff --cached > b.patch` with new additions 
+`add . && diff --cached > b.patch` with new additions
 
 `diff --cached --binary > b.patch` with binary files
 
 `apply b.patch` apply a patch file
 
-
 # stash
 
-`stash`
+`stash` put draft changes away
 
-`stash pop`
+`stash pop` work on draft changes once again
 
+# branch
 
-
+`branch -u origin/foo` make local branch track a remote branch
 
 # miscellaneous
 
 `cherry-pick 1337123` apply commit from another branch
 
-
 <!--
 https://increment.com/open-source/more-productive-git/
 -->
-
