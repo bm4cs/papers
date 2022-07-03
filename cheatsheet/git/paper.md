@@ -3,11 +3,11 @@ title: "git cheatsheet v0.1 (@bm4cs)"
 description: "arf arf we gotcha"
 ---
 
-# .gitconfig
+## .gitconfig
 
     [user]
       name = Ben Simmonds
-      email = ben@bencode.net
+      email = ben@bencode.io
       autocrlf = true
     [pull]
       rebase = true
@@ -20,17 +20,17 @@ description: "arf arf we gotcha"
     [mergetool bc4]
       path=~/opt/bc4/bcomp
 
-# checkout
+## checkout
 
 `checkout <tree-ish>` checkout a branch
 
 `checkout -- <pathspec>` checkout a file from branch
 
-# rebase or merge
+## rebase or merge
 
 `pull --rebase` rebase any new commits from upstream
 
-# log
+## log
 
 `show --pretty='' --name-status deadb33f`
 
@@ -44,7 +44,7 @@ description: "arf arf we gotcha"
 
 `log --before="1 week ago"`
 
-# diff
+## diff
 
 Compare the contents of a file to an earlier revision.
 
@@ -62,11 +62,11 @@ Compare the contents of a file to an earlier revision.
 
 `diff master...develop` branches
 
-# commit
+## commit
 
 `commit --amend --no-edit` ammends the last commit
 
-# reset and clean
+## reset and clean
 
 `reset --hard deadb33f` resets everything (untracked, index) to commit or branch
 
@@ -82,7 +82,7 @@ Compare the contents of a file to an earlier revision.
 
 `clean -f -X` remove ignored files (e.g. build outputs)
 
-# patches
+## patches
 
 `diff > b.patch` make a patch file
 
@@ -92,17 +92,21 @@ Compare the contents of a file to an earlier revision.
 
 `apply b.patch` apply a patch file
 
-# stash
+## stash
 
 `stash` put draft changes away
 
 `stash pop` work on draft changes once again
 
-# branch
+## remotes
+
+`remote -v` list out remote URIs
+
+`fetch origin dev/foo:dev/foo` bind the meta for a remote branch against a local branch (handy for huge repos), the branch can then used like normal `checkout dev/foo`
 
 `branch -u origin/foo` make local branch track a remote branch
 
-# miscellaneous
+## miscellaneous
 
 `cherry-pick 1337123` apply commit from another branch
 
