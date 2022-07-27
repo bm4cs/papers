@@ -32,7 +32,7 @@ description: "arf arf we gotcha"
 
 ## log
 
-`show --pretty='' --name-status deadb33f`
+`show --pretty='' --name-status deadb33f` files in a commit
 
 `log --author=Benjamin`
 
