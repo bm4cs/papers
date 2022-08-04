@@ -78,9 +78,11 @@ Compare the contents of a file to an earlier revision.
 
 `clean -f` actually do it
 
-`clean -f -d` for directories too
+`clean -f -d` recurse directories too
 
 `clean -f -X` remove ignored files (e.g. build outputs)
+
+`clean -dfX` recurse ignored
 
 ## patches
 
