@@ -5,20 +5,22 @@ description: "arf arf we gotcha"
 
 ## .gitconfig
 
-    [user]
-      name = Ben Simmonds
-      email = ben@bencode.io
-      autocrlf = true
-    [pull]
-      rebase = true
-    [diff]
-      tool = bc4
-    [difftool bc4]
-      path=~/opt/bc4/bcomp
-    [merge]
-      tool = bc4
-    [mergetool bc4]
-      path=~/opt/bc4/bcomp
+```ini
+[user]
+  name = Ben Simmonds
+  email = ben@bencode.io
+  autocrlf = true
+[pull]
+  rebase = true
+[diff]
+  tool = bc4
+[difftool bc4]
+  path=~/opt/bc4/bcomp
+[merge]
+  tool = bc4
+[mergetool bc4]
+  path=~/opt/bc4/bcomp
+```
 
 ## checkout
 
@@ -65,6 +67,10 @@ Compare the contents of a file to an earlier revision.
 ## commit
 
 `commit --amend --no-edit` ammends the last commit
+
+## branch
+
+`git branch -l --sort=committerdate | head` branches recently worked on
 
 ## reset and clean
 
